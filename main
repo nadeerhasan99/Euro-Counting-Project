@@ -1,0 +1,155 @@
+% Clear previous data and close figures
+% Clear previous data and close figures
+clear; close all; clc;
+
+% Read the grayscale image and perform top-hat transformation
+originalRGB = imread('euros5.bmp');
+originalGray = rgb2gray(originalRGB);
+
+% Apply CLAHE to enhance contrast
+%imshow(claheImage)
+
+% Binarize the image and perform morphological operations
+im_bin = imbinarize(originalGray, graythresh(originalGray));
+im_closed = imclose(im_bin, strel("disk", 4));
+im_filled = imfill(im_closed, 'holes');
+
+% Compute the distance transform and identify extended minima
+im_dist = -bwdist(~im_filled);
+mask = imextendedmin(im_dist, 2);
+im_dist2 = imimposemin(im_dist, mask);
+
+% Perform watershed segmentation
+im_water = watershed(im_dist2);
+im_final = im_filled;
+im_final(im_water == 0) = 0;
+
+% Label connected components and compute properties
+[Label, nbr_obj] = bwlabel(im_final, 8);
+RGB = label2rgb(Label, 'lines', 'white', 'shuffle');
+
+props = regionprops("table", Label, "Centroid", "MajorAxisLength", "MinorAxisLength");
+centers = props.Centroid;
+diameters = mean([props.MajorAxisLength props.MinorAxisLength],2);
+radii = diameters/2;
+
+centroids = cat(1, props.Centroid);
+number = (1:nbr_obj);
+
+disp(['Total number of coins: ', num2str(nbr_obj)]);
+
+I = originalRGB;
+% Define the radius of the circular neighborhood
+radiusPixel = 5;  % Replace with the desired radius
+indentPixel = 5;  % for the annulus
+
+% Initialize arrays to store average pixel values
+averageCirclePixelValues = zeros(size(centers, 1), 3);
+averageAnnularPixelValues = zeros(size(centers, 1), 3);
+
+% Loop through each center
+for i = 1:size(centers, 1)
+    % Extract the circular neighborhood around the current center
+    circleMask = createCircularMask(I, centers(i, :), radiusPixel);
+
+    % Apply the circular mask on the CLAHE-enhanced RGB image
+    circleImage = bsxfun(@times, I, cast(circleMask, class(I)));
+
+    % Get all pixel values within the circular mask
+    circlePixelValues = reshape(circleImage, [], 3);
+
+    % Calculate the average pixel values for the circular mask
+    averageCirclePixelValues(i, :) = mean(circlePixelValues, 1);
+
+    % Extract the annular neighborhood around the current center
+    innerRadius = radii(i) - indentPixel; % Adjust as needed
+    annularMask = createAnnularMask(I, centers(i, :), innerRadius, radii(i)-3);
+
+    % Apply the annular mask on the CLAHE-enhanced RGB image
+    annularImage = bsxfun(@times, I, cast(annularMask, class(I)));
+
+    % Get all pixel values within the annular mask
+    annularPixelValues = reshape(annularImage, [], 3);
+
+    % Calculate the average pixel values for the annular mask
+    averageAnnularPixelValues(i, :) = mean(annularPixelValues, 1);
+end
+
+% Calculate the relative pixel differences
+relativePixelDifferences = abs(averageAnnularPixelValues - averageCirclePixelValues) ./ (averageCirclePixelValues + 1);
+
+
+% Constants for coin diameters (in millimeters)
+diameter2Euro = 64; 
+diameter1Euro = 57.8;
+diameter50Cent = 59.8;
+diameter20Cent = 55;
+diameter10Cent = 48.8;
+diameter5Cent = 52.4;
+diameter2Cent = 46.4;
+diameter1Cent = 40;
+
+lengthTolerance = 0.8;
+
+%
+diff1Euro = [65, 51, 17];
+diff50Cent = [3, 2, 1];
+
+pixelTolerance = 2;
+
+% Discriminate coins based on diameter
+detectedCoins = zeros(size(diameters));  
+e2=0; e1=0; c50=0; c20=0; c10=0; c5=0; c2=0; c1=0; 
+
+for i = 1:length(diameters)
+    if abs(diameters(i) - diameter2Euro) < lengthTolerance
+        detectedCoins(i) = 2;
+        e2=e2+1;
+    elseif (abs(diameters(i) - diameter1Euro) < lengthTolerance) %&& (all(abs(pixelDifferences(i, :) - diff1Euro) < pixelTolerance))
+        detectedCoins(i) = 1;
+        e1=e1+1; 
+    elseif (abs(diameters(i) - diameter50Cent) < lengthTolerance) %&& (all(abs(pixelDifferences(i, :) - diff50Cent) < pixelTolerance))
+        detectedCoins(i) = 0.5;
+        c50=c50+1;
+
+    elseif abs(diameters(i) - diameter20Cent) < lengthTolerance
+        detectedCoins(i) = 0.2;
+        c20=c20+1;
+    elseif abs(diameters(i) - diameter10Cent) < lengthTolerance
+        detectedCoins(i) = 0.1;
+        c10=c10+1;
+    elseif abs(diameters(i) - diameter5Cent) < lengthTolerance
+        detectedCoins(i) = 0.05;
+        c5=c5+1;
+    elseif abs(diameters(i) - diameter2Cent) < lengthTolerance
+        detectedCoins(i) = 0.02;
+        c2=c2+1;
+    elseif abs(diameters(i) - diameter1Cent) < lengthTolerance
+        detectedCoins(i) = 0.01;
+        c1=c1+1;
+    else
+        detectedCoins(i) = NaN; % Unrecognized coin
+    end
+end
+
+
+tt = table(e2,e1,c50,c20,c10,c5,c2,c1,nbr_obj)
+
+totalAmount = (e2*200 + e1*100 + c50*50 + c20*20 + c10*10 + c5*5 + c2*2 + c1*1)/100;
+disp(["Total Amount of money: ", num2str(totalAmount), "euros"] );
+
+% Display the original image
+imshow(originalRGB)
+% Display circles on the image
+hold on;
+
+% count the number of coins
+text(centers(:,1),centers(:,2),num2str(number(:)),'color','Yellow','FontSize',10);
+
+% outer annulus
+viscircles(centers, radii(:), 'EdgeColor', 'r');
+viscircles(centers, radii(:) - indentPixel, 'EdgeColor', 'r');
+
+% inner circle
+viscircles(centers, radiusPixel, 'EdgeColor', 'b');
+
