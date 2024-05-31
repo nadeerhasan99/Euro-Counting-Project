@@ -3,7 +3,7 @@
 clear; close all; clc;
 
 % Read the grayscale image and perform top-hat transformation
-originalRGB = imread('euros5.bmp');
+originalRGB = imread('Images/euros5.bmp');
 originalGray = rgb2gray(originalRGB);
 
 % Apply CLAHE to enhance contrast
